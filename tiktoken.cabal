@@ -10,6 +10,8 @@ license-file:       LICENSE
 author:             Gabriella Gonzalez
 maintainer:         GenuineGabriella@gmail.com
 
+extra-source-files: `README.md`
+
 library
     build-depends:    base            >= 4.18.0.0 && < 5
                     , base64          >= 1.0      && < 1.1
