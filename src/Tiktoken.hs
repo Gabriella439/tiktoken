@@ -19,7 +19,7 @@
 -- main = do
 --     text <- Text.IO.`Data.Text.IO.readFile` \"cl100k\_base.tiktoken\"
 --
---     case `textToEncoding` text of
+--     case `tiktokenToEncoding` text of
 --         `Left` errorBundle ->
 --             Exception.`Exception.throwIO` errorBundle
 --         `Right` encoding ->
@@ -34,7 +34,7 @@
 module Tiktoken
     ( -- * Types
       Encoding
-    , textToEncoding
+    , tiktokenToEncoding
     , addSpecialTokens
 
       -- * Tokenization
@@ -127,16 +127,19 @@ parseDecode = do
 
     loop 0 initialVector
 
+-- | Create an `Encoding` from an ordered set of tokens
+tokensToEncoding :: Vector ByteString -> Encoding
+tokensToEncoding decode = Encoding{..}
+  where
+    encode = Trie.fromList (Vector.toList (Vector.imap adapt decode))
+      where
+        adapt index token = (token, index)
+
 -- | Parse an encoding from the `.tiktoken` file format
-textToEncoding :: Text -> Either (ParseErrorBundle Text Void) Encoding
-textToEncoding text = do
-    decode <- Vector.createT (Megaparsec.runParserT parseDecode "" text)
-
-    let encode = Trie.fromList (Vector.toList (Vector.imap adapt decode))
-          where
-            adapt index token = (token, index)
-
-    return Encoding{..}
+tiktokenToEncoding :: Text -> Either (ParseErrorBundle Text Void) Encoding
+tiktokenToEncoding text =
+    fmap tokensToEncoding
+        (Vector.createT (Megaparsec.runParserT parseDecode "" text))
 
 -- | Add special tokens to a base `Encoding`
 addSpecialTokens :: Vector ByteString -> Encoding -> Encoding
