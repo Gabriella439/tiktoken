@@ -14,19 +14,15 @@
 -- @
 -- {-# LANGUAGE OverloadedStrings #-}
 --
--- import qualified "Tiktoken"
+-- import "Tiktoken" (`o200k_base`, toTokens, toTokenIDs)
 --
 -- main :: `IO` ()
 -- main = do
---     encoding <- "Tiktoken".`Tiktoken.cl100k_base`
+--     -- `Just` [\"El\",\" per\",\"ro\",\" come\",\" las\",\" man\",\"zana\",\"s\"]
+--     `print` (`toTokens` `o200k_base` \"El perro come las manzanas\")
 --
---     let input = \"El perro come las manzanas\"
---
---     -- `Just` [\"El\",\" per\",\"ro\",\" come\",\" las\",\" man\",\"zan\",\"as\"]
---     `print` ("Tiktoken".`Tiktoken.toTokens` encoding input)
---
---     -- `Just` [6719,824,299,2586,5252,893,50226,300]
---     `print` ("Tiktoken".`Tiktoken.toTokenIDs` encoding input)
+--     -- `Just` [4422,96439,3063,1996,873,90333,82]
+--     `print` (`toTokenIDs` `o200k_base` \"El perro come las manzanas\")
 -- @
 module Tiktoken
     ( -- * Encoding
@@ -78,6 +74,7 @@ import qualified Data.Trie as Trie
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Mutable as Vector.Mutable
 import qualified Paths_tiktoken as Paths
+import qualified System.IO.Unsafe as Unsafe
 import qualified Text.Megaparsec as Megaparsec
 import qualified Text.Megaparsec.Char as Megaparsec.Char
 
@@ -155,7 +152,7 @@ tokensToEncoding decode = Encoding{..}
 
     specialTokens = mempty
 
--- | Parse an encoding from the `.tiktoken` file format
+-- | Parse an encoding from the @.tiktoken@ file format
 tiktokenToEncoding :: Text -> Either (ParseErrorBundle Text Void) Encoding
 tiktokenToEncoding text =
     fmap tokensToEncoding
@@ -194,38 +191,56 @@ loadEncoding file specialTokens = do
     return (addSpecialTokens specialTokens encoding)
 
 -- | @r50k_base@ `Encoding`
-r50k_base :: IO Encoding
-r50k_base = loadEncoding "r50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ] 
+r50k_base :: Encoding
+r50k_base =
+    Unsafe.unsafePerformIO
+        (loadEncoding "r50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ])
+{-# NOINLINE r50k_base #-}
 
 -- | @p50k_base@ `Encoding`
-p50k_base :: IO Encoding
-p50k_base = loadEncoding "p50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ] 
+p50k_base :: Encoding
+p50k_base =
+    Unsafe.unsafePerformIO
+        (loadEncoding "p50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ])
+{-# NOINLINE p50k_base #-}
 
 -- | @p50k_edit@ `Encoding`
-p50k_edit :: IO Encoding
-p50k_edit = loadEncoding "p50k_base.tiktoken"
-    [ (_ENDOFTEXT , 50256)
-    , (_FIM_PREFIX, 50281)
-    , (_FIM_MIDDLE, 50282)
-    , (_FIM_SUFFIX, 50283)
-    ] 
+p50k_edit :: Encoding
+p50k_edit =
+    Unsafe.unsafePerformIO
+        (loadEncoding "p50k_base.tiktoken"
+            [ (_ENDOFTEXT , 50256)
+            , (_FIM_PREFIX, 50281)
+            , (_FIM_MIDDLE, 50282)
+            , (_FIM_SUFFIX, 50283)
+            ] 
+        )
+{-# NOINLINE p50k_edit #-}
 
 -- | @cl100k_base@ `Encoding`
-cl100k_base :: IO Encoding
-cl100k_base = loadEncoding "cl100k_base.tiktoken"
-    [ (_ENDOFTEXT  , 100257)
-    , (_FIM_PREFIX , 100258)
-    , (_FIM_MIDDLE , 100259)
-    , (_FIM_SUFFIX , 100260)
-    , (_ENDOFPROMPT, 100276)
-    ]
+cl100k_base :: Encoding
+cl100k_base =
+    Unsafe.unsafePerformIO
+        (loadEncoding "cl100k_base.tiktoken"
+            [ (_ENDOFTEXT  , 100257)
+            , (_FIM_PREFIX , 100258)
+            , (_FIM_MIDDLE , 100259)
+            , (_FIM_SUFFIX , 100260)
+            , (_ENDOFPROMPT, 100276)
+            ]
+        )
+{-# NOINLINE cl100k_base #-}
 
 -- | @o200k_base@ `Encoding`
-o200k_base :: IO Encoding
-o200k_base = loadEncoding "o200k_base.tiktoken"
-    [ (_ENDOFTEXT  , 199999)
-    , (_ENDOFPROMPT, 200018)
-    ]
+o200k_base :: Encoding
+o200k_base =
+    Unsafe.unsafePerformIO
+        (loadEncoding "o200k_base.tiktoken"
+            [ (_ENDOFTEXT  , 199999)
+            , (_ENDOFPROMPT, 200018)
+            ]
+        )
+{-# NOINLINE o200k_base #-}
 
 splitOn :: ByteString -> ByteString -> NonEmpty ByteString
 splitOn separator initialBytes = initialPrefix :| loop initialSuffix
