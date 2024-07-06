@@ -19,6 +19,7 @@ library
                     , bytestring      >= 0.11.3.0
                     , bytestring-trie >= 0.2.4    && < 0.3
                     , containers      >= 0.5.0.0
+                    , deepseq         >= 1.4.0.0
                     , filepath
                     , megaparsec                     < 9.7
                     , text
@@ -29,3 +30,16 @@ library
     other-modules:    Paths_tiktoken
     ghc-options:      -Wall
     default-language: Haskell2010
+
+benchmark benchmark
+    hs-source-dirs:   benchmark
+    main-is:          Main.hs
+    type:             exitcode-stdio-1.0
+    build-depends:    base
+                    , bytestring
+                    , deepseq
+                    , filepath
+                    , tasty-bench < 0.4
+                    , tiktoken
+    other-modules:    Paths_tiktoken
+    ghc-options:      -with-rtsopts=-A32m -fproc-alignment=64

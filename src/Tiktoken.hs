@@ -1,4 +1,6 @@
 {-# LANGUAGE BlockArguments     #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings  #-}
@@ -49,6 +51,7 @@ module Tiktoken
     ) where
 
 import Control.Applicative ((<|>))
+import Control.DeepSeq (NFData)
 import Control.Monad.ST (ST)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
@@ -58,6 +61,7 @@ import Data.Text (Text)
 import Data.Trie (Trie)
 import Data.Vector (MVector, Vector, (!?))
 import Data.Void (Void)
+import GHC.Generics (Generic)
 import Prelude hiding (id)
 import System.FilePath ((</>))
 import Text.Megaparsec (ParseErrorBundle, ParsecT)
@@ -85,7 +89,8 @@ data Encoding = Encoding
     { encode :: Trie Int
     , decode :: Vector ByteString
     , specialTokens :: Map ByteString Int
-    }
+    } deriving stock (Generic)
+      deriving anyclass (NFData)
 
 parseToken :: ParsecT Void Text m ByteString
 parseToken = do

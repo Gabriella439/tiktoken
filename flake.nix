@@ -10,16 +10,21 @@
         config = { };
 
         overlay = pkgsNew: pkgsOld: {
-          tiktoken =
-            pkgsNew.haskell.lib.justStaticExecutables
-              pkgsNew.haskellPackages.tiktoken;
-
           haskellPackages = pkgsOld.haskellPackages.override (old: {
-            overrides = pkgsNew.haskell.lib.packageSourceOverrides {
-              base64 = "1.0";
+            overrides =
+              pkgsNew.lib.fold
+                  pkgsNew.lib.composeExtensions
+                  (old.overrides or (_: _: { }))
+                  [ (pkgsNew.haskell.lib.packageSourceOverrides {
+                      base64 = "1.0";
 
-              tiktoken = ./.;
-            };
+                      tiktoken = ./.;
+                    })
+                    (hself: hsuper: {
+                      tiktoken =
+                        pkgsNew.haskell.lib.doBenchmark hsuper.tiktoken;
+                    })
+                  ];
           });
         };
 
