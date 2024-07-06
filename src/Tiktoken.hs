@@ -35,6 +35,7 @@ module Tiktoken
     ( -- * Types
       Encoding
     , textToEncoding
+    , addSpecialTokens
 
       -- * Tokenization
     , toTokens
@@ -67,7 +68,7 @@ import qualified Text.Megaparsec as Megaparsec
 import qualified Text.Megaparsec.Char as Megaparsec.Char
 
 {-| This is an efficient internal representation of an encoding like
-    @cl100k_base@, @gpt2@, or @p50k_edit@.
+    @cl100k_base@ or @p50k_base@.
 -}
 data Encoding = Encoding{ encode :: Trie Int, decode :: Vector ByteString }
 
@@ -136,6 +137,19 @@ textToEncoding text = do
             adapt index token = (token, index)
 
     return Encoding{..}
+
+-- | Add special tokens to a base `Encoding`
+addSpecialTokens :: Vector ByteString -> Encoding -> Encoding
+addSpecialTokens tokens Encoding{ encode = oldEncode, decode = oldDecode } =
+        Encoding{..}
+  where
+    encode = Trie.unionR oldEncode newTrie
+      where
+        newTrie = Trie.fromList (Vector.toList (Vector.imap adapt tokens))
+          where
+            adapt index token = (token, index + Vector.length oldDecode)
+
+    decode = oldDecode <> tokens
 
 tokenizeWith
     :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe (Vector a)
