@@ -16,12 +16,12 @@ data-dir:           data
 library
     build-depends:    base            >= 4.18.0.0 && < 5
                     , base64          >= 1.0      && < 1.1
-                    , bytestring
+                    , bytestring      >= 0.11.3.0
                     , bytestring-trie >= 0.2.4    && < 0.3
                     , containers      >= 0.5.0.0
                     , filepath
                     , megaparsec                     < 9.7
-                    , text                           < 2.2
+                    , text
                     , transformers    >= 0.2.0.0
                     , vector                         < 0.14
     hs-source-dirs:   src
