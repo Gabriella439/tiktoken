@@ -1,41 +1,47 @@
 {-# LANGUAGE BlockArguments     #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE OverloadedLists    #-}
 {-# LANGUAGE RecordWildCards    #-}
 
 -- | You can use this module to convert back and forth between a `ByteString`
---   and its corresponding tokens using an existing encoding like @cl100k_base@.
+--   and its corresponding tokens using an existing encoding like @cl100k_base@
+--   or @o200k_base@
 --
 --   Example usage:
 --
 -- @
 -- {-# LANGUAGE OverloadedStrings #-}
 --
--- import qualified "Control.Exception" as Exception
--- import qualified "Data.Text.IO" as Text.IO
 -- import qualified "Tiktoken"
 --
 -- main :: `IO` ()
 -- main = do
---     text <- Text.IO.`Data.Text.IO.readFile` \"cl100k\_base.tiktoken\"
+--     encoding <- "Tiktoken".`Tiktoken.cl100k_base`
 --
---     case `tiktokenToEncoding` text of
---         `Left` errorBundle ->
---             Exception.`Exception.throwIO` errorBundle
---         `Right` encoding ->
---             let input = \"El perro come las manzanas\"
+--     let input = \"El perro come las manzanas\"
 --
---             -- Just [\"El\",\" per\",\"ro\",\" come\",\" las\",\" man\",\"zan\",\"as\"]
---             print (Tiktoken.`Tiktoken.toTokens` encoding input)
+--     -- `Just` [\"El\",\" per\",\"ro\",\" come\",\" las\",\" man\",\"zan\",\"as\"]
+--     `print` ("Tiktoken".`Tiktoken.toTokens` encoding input)
 --
---             -- Just [6719,824,299,2586,5252,893,50226,300]
---             print (Tiktoken.`Tiktoken.toTokenIDs` encoding input)
+--     -- `Just` [6719,824,299,2586,5252,893,50226,300]
+--     `print` ("Tiktoken".`Tiktoken.toTokenIDs` encoding input)
 -- @
 module Tiktoken
-    ( -- * Types
+    ( -- * Encoding
       Encoding
     , tiktokenToEncoding
     , addSpecialTokens
+
+      -- * Stock Encodings
+    , r50k_base
+    , p50k_base
+    , p50k_edit
+    , cl100k_base
+    , o200k_base
+      -- ** by model name
+
 
       -- * Tokenization
     , toTokens
@@ -51,31 +57,37 @@ import Control.Monad.ST (ST)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
 import Data.List.NonEmpty (NonEmpty(..))
+import Data.Map (Map)
 import Data.Text (Text)
 import Data.Trie (Trie)
 import Data.Vector (MVector, Vector, (!?))
 import Data.Void (Void)
 import Prelude hiding (id)
+import System.FilePath ((</>))
 import Text.Megaparsec (ParseErrorBundle, ParsecT)
 
+import qualified Control.Exception as Exception
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64.Encoding
 import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
+import qualified Data.Text.IO as Text.IO
 import qualified Data.Trie as Trie
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Mutable as Vector.Mutable
+import qualified Paths_tiktoken as Paths
 import qualified Text.Megaparsec as Megaparsec
 import qualified Text.Megaparsec.Char as Megaparsec.Char
 
 {-| This is an efficient internal representation of an encoding like
-    @cl100k_base@ or @p50k_base@.
+    @cl100k_base@, @p50k_edit@, or @o200k_base@
 -}
 data Encoding = Encoding
     { encode :: Trie Int
     , decode :: Vector ByteString
-    , specialTokens :: Vector ByteString
+    , specialTokens :: Map ByteString Int
     }
 
 parseToken :: ParsecT Void Text m ByteString
@@ -150,9 +162,70 @@ tiktokenToEncoding text =
         (Vector.createT (Megaparsec.runParserT parseDecode "" text))
 
 -- | Add special tokens to a base `Encoding`
-addSpecialTokens :: Vector ByteString -> Encoding -> Encoding
+addSpecialTokens :: Map ByteString Int -> Encoding -> Encoding
 addSpecialTokens tokens Encoding{ specialTokens = oldSpecialTokens, .. } =
-    Encoding{ specialTokens = oldSpecialTokens <> tokens, .. }
+    Encoding{ specialTokens = Map.union tokens oldSpecialTokens, .. }
+
+_ENDOFTEXT :: ByteString
+_ENDOFTEXT = "<|endoftext|>"
+
+_FIM_PREFIX :: ByteString
+_FIM_PREFIX = "<|fim_prefix|>"
+
+_FIM_MIDDLE :: ByteString
+_FIM_MIDDLE = "<|fim_middle|>"
+
+_FIM_SUFFIX :: ByteString
+_FIM_SUFFIX = "<|fim_suffix|>"
+
+_ENDOFPROMPT :: ByteString
+_ENDOFPROMPT = "<|endofprompt|>"
+
+loadEncoding :: FilePath -> Map ByteString Int -> IO Encoding
+loadEncoding file specialTokens = do
+    dataDirectory <- Paths.getDataDir
+
+    text <- Text.IO.readFile (dataDirectory </> file)
+
+    encoding <- case tiktokenToEncoding text of
+        Left exception -> Exception.throwIO exception
+        Right encoding -> return encoding
+
+    return (addSpecialTokens specialTokens encoding)
+
+-- | @r50k_base@ `Encoding`
+r50k_base :: IO Encoding
+r50k_base = loadEncoding "r50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ] 
+
+-- | @p50k_base@ `Encoding`
+p50k_base :: IO Encoding
+p50k_base = loadEncoding "p50k_base.tiktoken" [ (_ENDOFTEXT, 50256) ] 
+
+-- | @p50k_edit@ `Encoding`
+p50k_edit :: IO Encoding
+p50k_edit = loadEncoding "p50k_base.tiktoken"
+    [ (_ENDOFTEXT , 50256)
+    , (_FIM_PREFIX, 50281)
+    , (_FIM_MIDDLE, 50282)
+    , (_FIM_SUFFIX, 50283)
+    ] 
+
+-- | @cl100k_base@ `Encoding`
+cl100k_base :: IO Encoding
+cl100k_base = loadEncoding "cl100k_base.tiktoken"
+    [ (_ENDOFTEXT  , 100257)
+    , (_FIM_PREFIX , 100258)
+    , (_FIM_MIDDLE , 100259)
+    , (_FIM_SUFFIX , 100260)
+    , (_ENDOFPROMPT, 100276)
+    ]
+
+-- | @o200k_base@ `Encoding`
+o200k_base :: IO Encoding
+o200k_base = loadEncoding "o200k_base.tiktoken"
+    [ (_ENDOFTEXT  , 199999)
+    , (_ENDOFPROMPT, 200018)
+    ]
 
 splitOn :: ByteString -> ByteString -> NonEmpty ByteString
 splitOn separator initialBytes = initialPrefix :| loop initialSuffix
@@ -198,18 +271,15 @@ tokenizeWith fromTokenAndID Encoding{..} initialBytes =
 tokenizeWithSpecial
     :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe (Vector a)
 tokenizeWithSpecial fromTokenAndID encoding@Encoding{..} initialBytes =
-    foldr cons nil (Vector.imap adapt specialTokens) initialBytes
+    foldr cons nil (Map.toList specialTokens) initialBytes
   where
-    adapt index specialToken = (index + Vector.length decode, specialToken)
-
-    cons (specialTokenID, specialToken) tokenize bytes = do
-        fmap joinSegments (traverse tokenize (splitOn specialToken bytes))
+    cons (token, id) tokenize bytes = do
+        fmap joinSegments (traverse tokenize (splitOn token bytes))
       where
         joinSegments =
               Vector.concat
             . NonEmpty.toList
-            . NonEmpty.intersperse
-                (pure (fromTokenAndID specialToken specialTokenID))
+            . NonEmpty.intersperse [ fromTokenAndID token id ]
 
     nil bytes = tokenizeWith fromTokenAndID encoding bytes
 
