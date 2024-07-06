@@ -50,6 +50,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.ST (ST)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Text (Text)
 import Data.Trie (Trie)
 import Data.Vector (MVector, Vector, (!?))
@@ -59,6 +60,7 @@ import Text.Megaparsec (ParseErrorBundle, ParsecT)
 
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64.Encoding
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Trie as Trie
@@ -70,7 +72,11 @@ import qualified Text.Megaparsec.Char as Megaparsec.Char
 {-| This is an efficient internal representation of an encoding like
     @cl100k_base@ or @p50k_base@.
 -}
-data Encoding = Encoding{ encode :: Trie Int, decode :: Vector ByteString }
+data Encoding = Encoding
+    { encode :: Trie Int
+    , decode :: Vector ByteString
+    , specialTokens :: Vector ByteString
+    }
 
 parseToken :: ParsecT Void Text m ByteString
 parseToken = do
@@ -135,6 +141,8 @@ tokensToEncoding decode = Encoding{..}
       where
         adapt index token = (token, index)
 
+    specialTokens = mempty
+
 -- | Parse an encoding from the `.tiktoken` file format
 tiktokenToEncoding :: Text -> Either (ParseErrorBundle Text Void) Encoding
 tiktokenToEncoding text =
@@ -143,17 +151,25 @@ tiktokenToEncoding text =
 
 -- | Add special tokens to a base `Encoding`
 addSpecialTokens :: Vector ByteString -> Encoding -> Encoding
-addSpecialTokens tokens Encoding{ encode = oldEncode, decode = oldDecode } =
-        Encoding{..}
+addSpecialTokens tokens Encoding{ specialTokens = oldSpecialTokens, .. } =
+    Encoding{ specialTokens = oldSpecialTokens <> tokens, .. }
+
+splitOn :: ByteString -> ByteString -> NonEmpty ByteString
+splitOn separator initialBytes = initialPrefix :| loop initialSuffix
   where
-    encode = Trie.unionR oldEncode newTrie
+    split = ByteString.breakSubstring separator
+
+    (initialPrefix, initialSuffix) = split initialBytes
+
+    loop bytes
+        | ByteString.null bytes = []
+        | otherwise = prefix : loop suffix
       where
-        newTrie = Trie.fromList (Vector.toList (Vector.imap adapt tokens))
-          where
-            adapt index token = (token, index + Vector.length oldDecode)
+        rest = ByteString.drop (ByteString.length separator) bytes
 
-    decode = oldDecode <> tokens
+        (prefix, suffix) = split rest
 
+-- | Tokenizer that ignores special tokens
 tokenizeWith
     :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe (Vector a)
 tokenizeWith fromTokenAndID Encoding{..} initialBytes =
@@ -178,13 +194,32 @@ tokenizeWith fromTokenAndID Encoding{..} initialBytes =
 
         loop initialBytes 0
 
+-- | Tokenizer that is special-token-aware
+tokenizeWithSpecial
+    :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe (Vector a)
+tokenizeWithSpecial fromTokenAndID encoding@Encoding{..} initialBytes =
+    foldr cons nil (Vector.imap adapt specialTokens) initialBytes
+  where
+    adapt index specialToken = (index + Vector.length decode, specialToken)
+
+    cons (specialTokenID, specialToken) tokenize bytes = do
+        fmap joinSegments (traverse tokenize (splitOn specialToken bytes))
+      where
+        joinSegments =
+              Vector.concat
+            . NonEmpty.toList
+            . NonEmpty.intersperse
+                (pure (fromTokenAndID specialToken specialTokenID))
+
+    nil bytes = tokenizeWith fromTokenAndID encoding bytes
+
 {-| Use an `Encoding` to tokenize a `ByteString` into smaller `ByteString`s
 
     This will fail if you provide a `Encoding` that does not handle all
     possible `ByteString`s.
 -}
 toTokens :: Encoding -> ByteString -> Maybe (Vector ByteString)
-toTokens = tokenizeWith (\bytes _ -> bytes)
+toTokens = tokenizeWithSpecial (\bytes _ -> bytes)
 
 {-| Use an `Encoding` to tokenize a `ByteString` into token IDs
 
@@ -192,7 +227,7 @@ toTokens = tokenizeWith (\bytes _ -> bytes)
     possible `ByteString`s.
 -}
 toTokenIDs :: Encoding -> ByteString -> Maybe (Vector Int)
-toTokenIDs = tokenizeWith (\_ id -> id)
+toTokenIDs = tokenizeWithSpecial (\_ id -> id)
 
 {-| Combine a sequence of `ByteString` tokens back into a `ByteString`
 
