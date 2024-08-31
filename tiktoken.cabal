@@ -11,7 +11,9 @@ author:             Gabriella Gonzalez
 maintainer:         GenuineGabriella@gmail.com
 
 extra-source-files: README.md
+                  , CHANGELOG.md
                   , tasty/sample.txt
+                  , tasty/tokens.golden
                   , tasty/tokens.golden
 data-dir:           data
 
@@ -32,6 +34,7 @@ library
     hs-source-dirs:   src
     exposed-modules:  Tiktoken
     other-modules:    Paths_tiktoken
+    autogen-modules:  Paths_tiktoken
     ghc-options:      -Wall
     default-language: Haskell2010
 
