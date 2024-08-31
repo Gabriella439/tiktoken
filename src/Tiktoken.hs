@@ -11,8 +11,8 @@
 {-# LANGUAGE RecordWildCards       #-}
 
 -- | You can use this module to convert back and forth between a `ByteString`
---   and its corresponding tokens using an existing encoding like @cl100k_base@
---   or @o200k_base@
+--   and its corresponding tokens using an existing encoding like `cl100k_base`
+--   or `o200k_base`
 --
 --   Example usage:
 --
@@ -486,7 +486,12 @@ splitOnSeparator separator initialBytes = initialPrefix :| loop initialSuffix
 
         (prefix, suffix) = split rest
 
--- | Tokenizer that is special-token-aware
+{-| Use an `Encoding` to tokenize a `ByteString` into smaller `ByteString`s and
+    their associated ranks
+
+    This only fails if you provide an `Encoding` that cannot rank all possible
+    1-byte sequences
+-}
 toTokensAndRanks :: Encoding -> ByteString -> Maybe [(Int, ByteString)]
 toTokensAndRanks encoding@Encoding{..} initialBytes =
     foldr cons nil (Map.toList specialTokens) initialBytes
