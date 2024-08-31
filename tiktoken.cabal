@@ -57,5 +57,4 @@ benchmark benchmark
                     , filepath
                     , tasty-bench < 0.4
                     , tiktoken
-    other-modules:    Paths_tiktoken
     ghc-options:      -with-rtsopts=-A32m -fproc-alignment=64
