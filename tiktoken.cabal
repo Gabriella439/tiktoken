@@ -11,25 +11,41 @@ author:             Gabriella Gonzalez
 maintainer:         GenuineGabriella@gmail.com
 
 extra-source-files: `README.md`
+                  , tasty/sample.txt
+                  , tasty/golden.tokens
 data-dir:           data
 
 library
-    build-depends:    base            >= 4.18.0.0 && < 5
-                    , base64          >= 1.0      && < 1.1
-                    , bytestring      >= 0.11.3.0
-                    , bytestring-trie >= 0.2.4    && < 0.3
-                    , containers      >= 0.5.0.0
-                    , deepseq         >= 1.4.0.0
+    build-depends:    base                 >= 4.18.0.0 && < 5
+                    , base64               >= 1.0      && < 1.1
+                    , bytestring           >= 0.11.3.0
+                    , containers           >= 0.5.0.0
+                    , deepseq              >= 1.4.0.0
                     , filepath
-                    , megaparsec                     < 9.7
+                    , megaparsec                          < 9.7
+                    , pcre-light           >= 0.2
+                    , raw-strings-qq     
                     , text
-                    , transformers    >= 0.2.0.0
-                    , vector                         < 0.14
+                    , transformers         >= 0.2.0.0
+                    , unordered-containers
+                    , vector                              < 0.14
     hs-source-dirs:   src
     exposed-modules:  Tiktoken
     other-modules:    Paths_tiktoken
     ghc-options:      -Wall
     default-language: Haskell2010
+
+test-suite tasty
+    type:             exitcode-stdio-1.0
+    build-depends:    base
+                    , bytestring
+                    , tiktoken
+                    , tasty
+                    , tasty-silver < 3.4
+                    , text
+    hs-source-dirs:   tasty
+    main-is:          Main.hs
+    ghc-options:      -Wall
 
 benchmark benchmark
     hs-source-dirs:   benchmark
