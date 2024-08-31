@@ -19,15 +19,15 @@
 -- @
 -- {-# LANGUAGE OverloadedStrings #-}
 --
--- import "Tiktoken" (`o200k_base`, toTokens, toTokenIDs)
+-- import "Tiktoken" (`o200k_base`, toTokens, toRanks)
 --
 -- main :: `IO` ()
 -- main = do
---     -- `Just` [\"El\",\" per\",\"ro\",\" come\",\" las\",\" man\",\"zana\",\"s\"]
+--     -- `Just` [\"El\",\" perro\",\" come\",\" las\",\" man\",\"z\",\"anas\"]
 --     `print` (`toTokens` `o200k_base` \"El perro come las manzanas\")
 --
---     -- `Just` [4422,96439,3063,1996,873,90333,82]
---     `print` (`toTokenIDs` `o200k_base` \"El perro come las manzanas\")
+--     -- `Just` [4422,96439,3063,1996,873,89,14457]
+--     `print` (`toRanks` `o200k_base` \"El perro come las manzanas\")
 -- @
 module Tiktoken
     ( -- * Encoding
@@ -41,16 +41,15 @@ module Tiktoken
     , p50k_edit
     , cl100k_base
     , o200k_base
-      -- ** by model name
-
 
       -- * Tokenization
     , toTokens
-    , toTokenIDs
+    , toRanks
+    , toTokensAndRanks
 
       -- * Detokenization
     , fromTokens
-    , fromTokenIDs
+    , fromRanks
     ) where
 
 import Control.Applicative ((<|>))
@@ -68,7 +67,6 @@ import Data.Vector (MVector, Vector, (!?))
 import Data.Void (Void)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
-import Prelude hiding (id)
 import System.FilePath ((</>))
 import Text.Megaparsec (ParseErrorBundle, ParsecT)
 import Text.RawString.QQ (r)
@@ -89,7 +87,6 @@ import qualified Data.Text.IO as Text.IO
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Mutable as Vector.Mutable
 import qualified Paths_tiktoken as Paths
-import qualified Prelude
 import qualified System.IO.Unsafe as Unsafe
 import qualified Text.Megaparsec as Megaparsec
 import qualified Text.Megaparsec.Char as Megaparsec.Char
@@ -181,7 +178,7 @@ tiktokenToEncoding
     :: ByteString
     -- ^ Regular expression used for coarse-grained splitting of the input
     -> Text
-    -- ^ The contents fo the @.tiktoken@ file
+    -- ^ The contents of the @.tiktoken@ file
     -> Either (ParseErrorBundle Text Void) Encoding
 tiktokenToEncoding regex text =
     fmap (tokensToEncoding regex)
@@ -311,24 +308,29 @@ drop1      []  = []
 {-| This is basically the same thing as `Maybe Int` except with an `Ord`
     instance that treats `Ranked` values as less than `Unranked` values
 -}
-data Rank = Ranked Int | Unranked
+data Ranked = Ranked Int | Unranked
     deriving (Eq, Ord)
 
 data Chunk = Chunk
     { rank  :: Int
       -- ^ Rank of this chunk
-    , rank2 :: Rank
+    , rank2 :: Ranked
       -- ^ Rank of this chunk combined with the next chunk
     }
 
+{-| This corresponds to the `_byte_pair_merge` function in the upstream `tiktoken`
+    package:
+
+    https://github.com/openai/tiktoken/blob/c0ba74c238d18b4824c25f3c27fc8698055b9a76/src/lib.rs#L18-L74
+
+    The intermediate data structure is an `IntMap` instead of a `Vector` but other
+    than that the algorithm is essentially identical.
+-}
 bytePairEncode
-    :: (ByteString -> Int -> a)
-    -> HashMap ByteString Int
-    -> ByteString
-    -> Maybe [a]
-bytePairEncode fromTokenAndID hashMap bytes
+    :: HashMap ByteString Int -> ByteString -> Maybe [(Int, ByteString)]
+bytePairEncode hashMap bytes
     | Just rank <- HashMap.lookup bytes hashMap =
-        Just [ fromTokenAndID bytes rank ]
+        Just [ (rank, bytes) ]
     | ByteString.null bytes =
         pure []
     | otherwise = do
@@ -346,28 +348,39 @@ bytePairEncode fromTokenAndID hashMap bytes
 
                 pure Chunk{ rank, rank2 }
 
-        initChunks <- sequence (ByteString.zipWith toChunk bytes (ByteString.tail bytes))
+        initChunks <- do
+            sequence (ByteString.zipWith toChunk bytes (ByteString.tail bytes))
 
         lastChunk <- do
             rank <- lookupByte (ByteString.last bytes)
 
             pure Chunk{ rank, rank2 = Unranked }
 
-        let initialMap =
+        {- Unlike the upstream `tiktoken` we do not use `Vector (Key, Ranked)`
+           as our intermediate datastructure, but rather something more like
+           `IntMap Ranked` (technically `IntMap Chunk`, which is just a tiny
+           optimization).
+
+           This makes it cheaper to delete keys without having to rebuild a
+           `Vector` each time, but at the expense of neighbor lookups (e.g.
+           `lookupLT` / `lookupGT`) being more expensive.
+        -}
+        let initialMap :: IntMap Chunk
+            initialMap =
                 IntMap.fromList (zip [0 ..] (initChunks <> [ lastChunk ]))
 
         let keyValues = IntMap.toAscList (loop initialMap)
 
         pure do
             let adapt (index, Chunk{ rank }) nextIndex =
-                    fromTokenAndID (slice index nextIndex) rank
+                    (rank, slice index nextIndex)
 
             zipWith adapt keyValues (drop1 (map fst keyValues) <> [ size ])
   where
     size :: Int
     size = ByteString.length bytes
 
-    lookupSlice :: ByteString -> Rank
+    lookupSlice :: ByteString -> Ranked
     lookupSlice b = case HashMap.lookup b hashMap of
         Nothing  -> Unranked
         Just int -> Ranked int
@@ -379,37 +392,42 @@ bytePairEncode fromTokenAndID hashMap bytes
     loop chunks0 = case minimumBy (Ord.comparing rank2) chunks0 of
         Just (index, Chunk{ rank2 = Ranked ranked }) -> loop chunks3
           where
-            chunks1 = merge index ranked chunks0
+            chunks1 = rerank index ranked chunks0
 
             chunks2 = case IntMap.lookupLT index chunks1 of
                 Just (prevIndex, Chunk{ rank = prevRanked }) ->
-                    merge prevIndex prevRanked chunks1
+                    rerank prevIndex prevRanked chunks1
                 _ ->
                     chunks1
 
             chunks3 = case IntMap.lookupGT index chunks2 of
-                -- In theory we should never hit this case
-                -- Nothing -> chunks2
+                -- In theory we should never hit the `Nothing` case here because
+                -- the `rank2` field can only be `Ranked` if there is a `Chunk`
+                -- following this one.
+                Nothing ->
+                    error "Tiktoken.bytePairEncode: Internal error - a ranked byte pair is missing the second byte in the pair"
                 Just (nextIndex, _) -> IntMap.delete nextIndex chunks2
 
         _ ->
             chunks0
+
+    rerank :: Key -> Int -> IntMap Chunk -> IntMap Chunk
+    rerank index0 rank chunks = IntMap.insert index0 newChunk chunks
       where
-        merge :: Key -> Int -> IntMap Chunk -> IntMap Chunk
-        merge index0 rank = IntMap.insert index0 newChunk
-          where
-            maybeIndex3 = do
-                (index1, _) <- IntMap.lookupGT index0 chunks0
-                (index2, _) <- IntMap.lookupGT index1 chunks0
-                pure case IntMap.lookupGT index2 chunks0 of
-                    Just (index3, _) -> index3
-                    Nothing          -> size
+        maybeIndex3 = do
+            (index1, _) <- IntMap.lookupGT index0 chunks
 
-            rank2 = case maybeIndex3 of
-                Nothing     -> Unranked
-                Just index3 -> lookupSlice (slice index0 index3)
+            (index2, _) <- IntMap.lookupGT index1 chunks
 
-            newChunk = Chunk{ rank, rank2 }
+            pure case IntMap.lookupGT index2 chunks of
+                Just (index3, _) -> index3
+                Nothing          -> size
+
+        rank2 = case maybeIndex3 of
+            Nothing     -> Unranked
+            Just index3 -> lookupSlice (slice index0 index3)
+
+        newChunk = Chunk{ rank, rank2 }
 
 {-| Split a `ByteString` into smaller `ByteString`s, each of which are
     successive longest possible matches to the provided regular expression
@@ -434,14 +452,15 @@ splitUsingRegex pattern = loop Prelude.id
 
     regex = Regex.compile pattern [ Regex.utf8 ]
 
-{-| Tokenizer that divides up the input into coarse-grained chunks based on the
-    provided splitting regular expression before doing the final tokenization
+{-| Divide up the input into coarse-grained chunks based on the provided splitting
+    regular expression before doing the final byte pair encoding
 -}
-tokenizeWithSplitting
-    :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe [a]
-tokenizeWithSplitting fromTokenAndID Encoding{..} bytes = do
+bytePairEncodeWithSplitting :: Encoding -> ByteString -> Maybe [(Int, ByteString)]
+bytePairEncodeWithSplitting Encoding{..} bytes = do
     chunks <- splitUsingRegex regex bytes
-    tokenss <- traverse (bytePairEncode fromTokenAndID encode) chunks
+
+    tokenss <- traverse (bytePairEncode encode) chunks
+
     pure (concat tokenss)
 
 {-| Split a `ByteString` into smaller `ByteString`s separated by the given
@@ -461,56 +480,55 @@ splitOnSeparator separator initialBytes = initialPrefix :| loop initialSuffix
 
     loop bytes
         | ByteString.null bytes = []
-        | otherwise = prefix : loop suffix
+        | otherwise             = prefix : loop suffix
       where
         rest = ByteString.drop (ByteString.length separator) bytes
 
         (prefix, suffix) = split rest
 
 -- | Tokenizer that is special-token-aware
-tokenizeWithSpecial
-    :: (ByteString -> Int -> a) -> Encoding -> ByteString -> Maybe [a]
-tokenizeWithSpecial fromTokenAndID encoding@Encoding{..} initialBytes =
+toTokensAndRanks :: Encoding -> ByteString -> Maybe [(Int, ByteString)]
+toTokensAndRanks encoding@Encoding{..} initialBytes =
     foldr cons nil (Map.toList specialTokens) initialBytes
   where
-    cons (token, id) tokenizer bytes = do
+    cons (token, rank) tokenizer bytes = do
         fmap joinSegments (traverse tokenizer (splitOnSeparator token bytes))
       where
         joinSegments =
               concat
             . NonEmpty.toList
-            . NonEmpty.intersperse [ fromTokenAndID token id ]
+            . NonEmpty.intersperse [ (rank, token) ]
 
-    nil bytes = tokenizeWithSplitting fromTokenAndID encoding bytes
+    nil bytes = bytePairEncodeWithSplitting encoding bytes
 
 {-| Use an `Encoding` to tokenize a `ByteString` into smaller `ByteString`s
 
-    This will fail if you provide a `Encoding` that does not handle all
-    possible `ByteString`s.
+    This only fails if you provide an `Encoding` that cannot rank all possible
+    1-byte sequences
 -}
 toTokens :: Encoding -> ByteString -> Maybe [ByteString]
-toTokens = tokenizeWithSpecial (\bytes _ -> bytes)
+toTokens = fmap (fmap (fmap (fmap snd))) toTokensAndRanks
 
-{-| Use an `Encoding` to tokenize a `ByteString` into token IDs
+{-| Use an `Encoding` to tokenize a `ByteString` into ranks
 
-    This will fail if you provide a `Encoding` that does not handle all
-    possible `ByteString`s.
+    This only fails if you provide an `Encoding` that cannot rank all possible
+    1-byte sequences
 -}
-toTokenIDs :: Encoding -> ByteString -> Maybe [Int]
-toTokenIDs = tokenizeWithSpecial (\_ id -> id)
+toRanks :: Encoding -> ByteString -> Maybe [Int]
+toRanks = fmap (fmap (fmap (fmap fst))) toTokensAndRanks
 
 {-| Combine a sequence of `ByteString` tokens back into a `ByteString`
 
-    This is just a glorified @"Data.ByteString".`ByteString.concat`@ (no
+    This is just a synonym for @"Data.ByteString".`ByteString.concat`@ (no
     `Encoding` necessary), provided solely for consistency/convenience.
 -}
-fromTokens :: Vector ByteString -> ByteString
-fromTokens vector = ByteString.concat (Vector.toList vector)
+fromTokens :: [ByteString] -> ByteString
+fromTokens = ByteString.concat
 
-{-| Convert a sequence of token IDs back into a `ByteString`
+{-| Convert a sequence of ranks back into a `ByteString`
 
-    This will fail if you supply any token IDs which are not recognized by the
+    This will fail if you supply any ranks which are not recognized by the
     `Encoding`.
 -}
-fromTokenIDs :: Encoding -> Vector Int -> Maybe ByteString
-fromTokenIDs Encoding{..} vector = fmap fromTokens (traverse (decode !?) vector)
+fromRanks :: Encoding -> [Int] -> Maybe ByteString
+fromRanks Encoding{..} vector = fmap fromTokens (traverse (decode !?) vector)

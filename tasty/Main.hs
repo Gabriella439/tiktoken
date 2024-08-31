@@ -15,7 +15,7 @@ main = do
     Tasty.defaultMain do
         let actualTokens = do
                 bytes <- ByteString.readFile "tasty/sample.txt"
-                case Tiktoken.toTokenIDs Tiktoken.cl100k_base bytes of
+                case Tiktoken.toRanks Tiktoken.cl100k_base bytes of
                     Nothing     -> fail "Encoding failed"
                     Just tokens -> return tokens
 
