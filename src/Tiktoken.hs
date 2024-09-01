@@ -335,7 +335,7 @@ bytePairEncode hashMap bytes
         pure []
     | otherwise = do
         -- In practice this should always return a `Just` because all of
-        -- OpenAI's encodings are defined all bytes, but in theory the user
+        -- OpenAI's encodings are defined for all bytes, but in theory the user
         -- could create an `Encoding` that doesn't satisfy that invariant, so
         -- we still need to handle that case.
         let lookupByte :: Word8 -> Maybe Int
@@ -390,13 +390,13 @@ bytePairEncode hashMap bytes
 
     loop :: IntMap Chunk -> IntMap Chunk
     loop chunks0 = case minimumBy (Ord.comparing rank2) chunks0 of
-        Just (index, Chunk{ rank2 = Ranked ranked }) -> loop chunks3
+        Just (index, Chunk{ rank2 = Ranked rank }) -> loop chunks3
           where
-            chunks1 = rerank index ranked chunks0
+            chunks1 = rerank index rank chunks0
 
             chunks2 = case IntMap.lookupLT index chunks1 of
-                Just (prevIndex, Chunk{ rank = prevRanked }) ->
-                    rerank prevIndex prevRanked chunks1
+                Just (prevIndex, Chunk{ rank = prevRank }) ->
+                    rerank prevIndex prevRank chunks1
                 _ ->
                     chunks1
 
@@ -406,7 +406,8 @@ bytePairEncode hashMap bytes
                 -- following this one.
                 Nothing ->
                     error "Tiktoken.bytePairEncode: Internal error - a ranked byte pair is missing the second byte in the pair"
-                Just (nextIndex, _) -> IntMap.delete nextIndex chunks2
+                Just (nextIndex, _) ->
+                    IntMap.delete nextIndex chunks2
 
         _ ->
             chunks0
