@@ -52,10 +52,8 @@ module Tiktoken
     , fromRanks
     ) where
 
-import Control.Applicative ((<|>))
+import Control.Applicative (many)
 import Control.DeepSeq (NFData)
-import Control.Monad.ST (ST)
-import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
 import Data.Function (on)
 import Data.HashMap.Strict (HashMap)
@@ -63,10 +61,10 @@ import Data.IntMap (IntMap, Key)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Map (Map)
 import Data.Text (Text)
-import Data.Vector (MVector, Vector, (!?))
 import Data.Void (Void)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
+import Prelude hiding (lookup)
 import System.FilePath ((</>))
 import Text.Megaparsec (ParseErrorBundle, ParsecT)
 import Text.RawString.QQ (r)
@@ -84,12 +82,11 @@ import qualified Data.Ord as Ord
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Text.IO as Text.IO
-import qualified Data.Vector as Vector
-import qualified Data.Vector.Mutable as Vector.Mutable
 import qualified Paths_tiktoken as Paths
 import qualified System.IO.Unsafe as Unsafe
 import qualified Text.Megaparsec as Megaparsec
 import qualified Text.Megaparsec.Char as Megaparsec.Char
+import qualified Text.Megaparsec.Char.Lexer as Megaparsec.Lexer
 import qualified Text.Regex.PCRE.Light as Regex
 
 {-| This is an efficient internal representation of an encoding like
@@ -97,13 +94,13 @@ import qualified Text.Regex.PCRE.Light as Regex
 -}
 data Encoding = Encoding
     { encode :: HashMap ByteString Int
-    , decode :: Vector ByteString
+    , decode :: IntMap ByteString
     , specialTokens :: Map ByteString Int
     , regex :: ByteString
     } deriving stock (Generic)
       deriving anyclass (NFData)
 
-parseToken :: ParsecT Void Text m ByteString
+parseToken :: ParsecT Void Text m (Int, ByteString)
 parseToken = do
     base64Text <- Megaparsec.takeWhileP (Just "Base64 character") (/= ' ')
 
@@ -113,63 +110,26 @@ parseToken = do
         Left text -> fail (Text.unpack text)
         Right token -> return token
 
-    -- We don't bother parsing the token ID because the tokens are always stored
-    -- in sequential order by token ID.  We could *not* assume this but this
-    -- would not only make the parsing slower but it would also require using
-    -- a `HashMap` instead of a `Vector` to handle potential gaps in the token
-    -- ID sequence.  It's much more efficient to make this simplifying
-    -- assumption.
+    _ <- Megaparsec.Char.char ' '
 
-    _ <- Megaparsec.takeWhileP (Just "Base64 character") (/= '\n')
+    rank <- Megaparsec.Lexer.decimal
 
     _ <- Megaparsec.Char.char '\n'
 
-    return token
-
-parseDecode :: ParsecT Void Text (ST s) (MVector s ByteString)
-parseDecode = do
-    -- 100,000 is the size of the largest commonly-used encoding at the time of
-    -- this writing (`cl100k_base`) and it's not that expensive to pre-allocate
-    -- a `Vector` that big, so let's go wild and start with a large allocation.
-    let initialSize = 100_000
-
-    initialVector <- lift (Vector.Mutable.new initialSize)
-
-    let loop index vector
-            | index < size = do
-                let success = do
-                        token <- parseToken
-
-                        lift (Vector.Mutable.write vector index token)
-
-                        loop (index + 1) vector
-
-                let failure = do
-                        return (Vector.Mutable.take index vector)
-
-                success <|> failure
-                
-            | otherwise = do
-                largerVector <- lift (Vector.Mutable.grow vector size)
-
-                loop index largerVector
-          where
-            size = Vector.Mutable.length vector
-
-    loop 0 initialVector
+    return (rank, token)
 
 -- | Create an `Encoding` from regular expression and an ordered set of tokens
 tokensToEncoding
     :: ByteString
     -- ^ Regular expression used for coarse-grained splitting of the input
-    -> Vector ByteString
+    -> IntMap ByteString
     -- ^ The tokens in sequential order of their token IDs
     -> Encoding
 tokensToEncoding regex decode = Encoding{..}
   where
-    encode = HashMap.fromList (Vector.toList (Vector.imap adapt decode))
+    encode = HashMap.fromList (map swap (IntMap.toList decode))
       where
-        adapt index token = (token, index)
+        swap (rank, token) = (token, rank)
 
     specialTokens = mempty
 
@@ -180,9 +140,11 @@ tiktokenToEncoding
     -> Text
     -- ^ The contents of the @.tiktoken@ file
     -> Either (ParseErrorBundle Text Void) Encoding
-tiktokenToEncoding regex text =
-    fmap (tokensToEncoding regex)
-        (Vector.createT (Megaparsec.runParserT parseDecode "" text))
+tiktokenToEncoding regex text = Megaparsec.runParser parser "" text
+  where
+    parser = do
+        keyValues <- many parseToken
+        pure (tokensToEncoding regex (IntMap.fromList keyValues))
 
 -- | Add special tokens to a base `Encoding`
 addSpecialTokens :: Map ByteString Int -> Encoding -> Encoding
@@ -537,4 +499,6 @@ fromTokens = ByteString.concat
     `Encoding`.
 -}
 fromRanks :: Encoding -> [Int] -> Maybe ByteString
-fromRanks Encoding{..} vector = fmap fromTokens (traverse (decode !?) vector)
+fromRanks Encoding{..} vector = fmap fromTokens (traverse lookup vector)
+  where
+    lookup rank = IntMap.lookup rank decode
