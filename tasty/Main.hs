@@ -43,7 +43,7 @@ main = do
 
         let render :: Show a => [a] -> Text
             render = Text.unlines . map (Text.pack . show) . Foldable.toList
-                
+
         Tasty.testGroup "tests"
             [ Tasty.testGroup "golden"
                 [ Silver.goldenVsAction "r50k_base" "tasty/sample/r50k_base.golden" (normalRanks Tiktoken.r50k_base) render
