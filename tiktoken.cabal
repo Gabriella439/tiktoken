@@ -40,10 +40,12 @@ test-suite tasty
     type:             exitcode-stdio-1.0
     build-depends:    base
                     , bytestring
-                    , tiktoken
+                    , quickcheck-instances
                     , tasty
+                    , tasty-quickcheck
                     , tasty-silver < 3.4
                     , text
+                    , tiktoken
     hs-source-dirs:   tasty
     main-is:          Main.hs
     ghc-options:      -Wall

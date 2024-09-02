@@ -3,13 +3,28 @@
 module Main where
 
 import Data.Text (Text)
+import Test.QuickCheck.Instances ()
+import Test.Tasty.QuickCheck (Property, (===))
+import Tiktoken (Encoding)
 
 import qualified Data.ByteString as ByteString
 import qualified Data.Foldable as Foldable
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
 import qualified Test.Tasty as Tasty
+import qualified Test.Tasty.QuickCheck as Tasty.QuickCheck
 import qualified Test.Tasty.Silver as Silver
 import qualified Tiktoken
+
+roundTrip :: Encoding -> Text -> Property
+roundTrip encoding text = Just bytes === result
+  where
+    bytes = Text.Encoding.encodeUtf8 (Text.take 100 text)
+
+    result = do
+        ranks <- Tiktoken.toRanks encoding bytes
+
+        Tiktoken.fromRanks encoding ranks
 
 main :: IO ()
 main = do
@@ -48,6 +63,13 @@ main = do
                 , Silver.goldenVsAction "p50k_base" "tasty/tokenization/p50k_base.golden" (normalTokens Tiktoken.p50k_base) render
                 , Silver.goldenVsAction "cl100k_base" "tasty/tokenization/cl100k_base.golden" (normalTokens Tiktoken.cl100k_base) render
                 , Silver.goldenVsAction "o200k_base" "tasty/tokenization/o200k_base.golden" (normalTokens Tiktoken.o200k_base) render
+                ]
+            , Tasty.testGroup "roundtrip"
+                [ Tasty.QuickCheck.testProperty "r50k_base" (roundTrip Tiktoken.r50k_base)
+                , Tasty.QuickCheck.testProperty "p50k_base" (roundTrip Tiktoken.p50k_base)
+                , Tasty.QuickCheck.testProperty "p50k_edit" (roundTrip Tiktoken.p50k_edit)
+                , Tasty.QuickCheck.testProperty "cl100k_base" (roundTrip Tiktoken.cl100k_base)
+                , Tasty.QuickCheck.testProperty "o200k_base" (roundTrip Tiktoken.cl100k_base)
                 ]
 
             ]
