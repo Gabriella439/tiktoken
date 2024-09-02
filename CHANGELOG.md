@@ -1,3 +1,10 @@
+1.0.3
+
+- [Fix source distribution](https://github.com/Gabriella439/tiktoken/commit/cc1024f1e00b852b11cf7a498b9b7b63c8c3884a)
+
+  The `.tiktoken` files for each encoding were not being included correctly in
+  the source distribution uploaded to Hackage.
+
 1.0.2
 
 - [Correctly handle gaps in ranks](https://github.com/Gabriella439/tiktoken/commit/cc82cb192b1f22a2185257b3a1045e2aaf25a4e8)
