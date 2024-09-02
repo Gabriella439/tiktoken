@@ -244,15 +244,24 @@ o200k_base =
             ]
         )
   where
+    -- Note: This is not the same as the upstream pattern:
+    --
+    -- https://github.com/openai/tiktoken/blob/c0ba74c238d18b4824c25f3c27fc8698055b9a76/tiktoken_ext/openai_public.py#L101-L111
+    --
+    -- The reason why is that the `pcre-light` package doesn't treat an
+    -- ideographic space (U+3000) as whitespace whereas Python's `regex` package
+    -- does, so all of the rules below have to basically replace all occurrences
+    -- of `\s` with `\s\x{3000}`.  There might be other discrepancies, but
+    -- that's the only one I've found so far.
     regex =
         Char8.intercalate "|"
             [ [r|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|]
             , [r|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|]
             , [r|\p{N}{1,3}|]
-            , [r| ?[^\s\p{L}\p{N}]+[\r\n/]*|]
-            , [r|\s*[\r\n]+|]
-            , [r|\s+(?!\S)|]
-            , [r|\s+|]
+            , [r| ?[^\s\x{3000}\p{L}\p{N}]+[\r\n/]*|]
+            , [r|[\s\x{3000}]*[\r\n]+|]
+            , [r|[\s\x{3000}]+(?![^\s\x{3000}])|]
+            , [r|[\s\x{3000}]+|]
             ]
 {-# NOINLINE o200k_base #-}
 
@@ -413,7 +422,7 @@ splitUsingRegex pattern = loop Prelude.id
                     in  loop (diff . (prefix :)) suffix
                 _ -> Nothing
 
-    regex = Regex.compile pattern [ Regex.utf8 ]
+    regex = Regex.compile pattern [ Regex.utf8, Regex.anchored ]
 
 {-| Divide up the input into coarse-grained chunks based on the provided splitting
     regular expression before doing the final byte pair encoding
