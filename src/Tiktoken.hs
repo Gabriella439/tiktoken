@@ -289,13 +289,14 @@ data Chunk = Chunk
       -- ^ Rank of this chunk combined with the next chunk
     }
 
-{-| This corresponds to the `_byte_pair_merge` function in the upstream `tiktoken`
+{-| This corresponds to the @_byte_pair_merge@ function in the upstream @tiktoken@
     package:
 
     https://github.com/openai/tiktoken/blob/c0ba74c238d18b4824c25f3c27fc8698055b9a76/src/lib.rs#L18-L74
 
-    The intermediate data structure is an `IntMap` instead of a `Vector` but other
-    than that the algorithm is essentially identical.
+    The intermediate data structure is an `IntMap` instead of a
+    `Data.Vector.Vector` but other than that the algorithm is essentially
+    identical.
 -}
 bytePairEncode
     :: HashMap ByteString Int -> ByteString -> Maybe [(Int, ByteString)]
