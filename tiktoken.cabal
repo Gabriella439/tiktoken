@@ -12,9 +12,8 @@ maintainer:         GenuineGabriella@gmail.com
 
 extra-source-files: README.md
                   , CHANGELOG.md
-                  , tasty/sample.txt
-                  , tasty/tokens.golden
-                  , tasty/tokens.golden
+                  , tasty/**/*.txt
+                  , tasty/**/*.golden
 data-dir:           data
 
 library
