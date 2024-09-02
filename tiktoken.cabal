@@ -15,6 +15,10 @@ extra-source-files: README.md
                   , tasty/**/*.txt
                   , tasty/**/*.golden
 data-dir:           data
+data-files:         cl100k_base.tiktoken
+                  , o200k_base.tiktoken
+                  , p50k_base.tiktoken
+                  , r50k_base.tiktoken
 
 library
     build-depends:    base                 >= 4.15.0.0 && < 5
