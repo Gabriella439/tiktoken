@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               tiktoken
-version:            1.0.1
+version:            1.0.2
 synopsis:           Haskell implementation of tiktoken
 description:        This packages only implements tokenization.  In other words,
                     given an existing encoding (`cl100k_base`) you can tokenize
