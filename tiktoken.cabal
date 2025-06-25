@@ -9,6 +9,8 @@ license:            BSD-3-Clause
 license-file:       LICENSE
 author:             Gabriella Gonzalez
 maintainer:         GenuineGabriella@gmail.com
+homepage:           https://github.com/Gabriella439/tiktoken
+bug-reports:        https://github.com/Gabriella439/tiktoken/issues
 
 extra-source-files: README.md
                   , CHANGELOG.md
